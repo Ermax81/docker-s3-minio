@@ -1,56 +1,46 @@
-version: '3.7'
+version: '3'
 
-# Settings and configurations that are common for all containers
-x-minio-common: &minio-common
-  image: minio/minio:latest
-  command: server --console-address ":9001" http://minio{1...2}/data{1...2}
-  expose:
-    - "9000"
-    - "9001"
-  environment:
-    MINIO_ROOT_USER: minio
-    MINIO_ROOT_PASSWORD: minio123
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-    interval: 30s
-    timeout: 20s
-    retries: 3
-
-# starts 2 docker containers running minio server instances.
-# using nginx reverse proxy, load balancing, you can access
-# it through port 9000.
 services:
-  minio1:
-    <<: *minio-common
-    hostname: minio1
+  minio:
+    image: minio/minio:latest
+    hostname: minio
+    container_name: s3_minio
     volumes:
-      - data1-1:/data1
-      - data1-2:/data2
+      - ./storage/:/storage
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server --console-address ":9001" /storage
+    expose:
+      - "9000"  #api
+      - "9001"  #console
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
 
-  minio2:
-    <<: *minio-common
-    hostname: minio2
-    volumes:
-      - data2-1:/data1
-      - data2-2:/data2
+  createbuckets:
+    image: minio/mc:latest
+    container_name: s3_createbuckets
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c '
+      until (/usr/bin/mc config host add myminio http://s3_minio:9000 minio minio123 ) do echo '...waiting...' && sleep 1; done;
+      [[ ! -z "`/usr/bin/mc ls myminio | grep test`" ]] || /usr/bin/mc mb myminio/test;
+      /usr/bin/mc policy set download myminio/test;
+      exit 0;
+      '
 
   nginx:
     image: nginx:alpine
     hostname: nginx
+    container_name: s3_nginx
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "9000:9000"
       - "9001:9001"
     depends_on:
-      - minio1
-      - minio2
-
-
-## By default this config uses default local driver,
-## For custom volumes replace with volume driver configuration.
-volumes:
-  data1-1:
-  data1-2:
-  data2-1:
-  data2-2:
+      - minio

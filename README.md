@@ -1,6 +1,7 @@
 # docker-s3-minio
 
 This repository is a template to implement S3 container using minio/minio image.
+A bucket named 'test' will be create and files can be find in storage folder.
 
 How to launch the service
 ```docker-compose up -d```
