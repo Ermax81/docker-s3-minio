@@ -1,16 +1,18 @@
-version: '3'
+version: "3.8"
 
 services:
+
   minio:
     image: minio/minio:latest
     hostname: minio
-    container_name: s3_minio
+    container_name: minio
     volumes:
-      - ./storage/:/storage
+      - ./local/s3/data:/data
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: minio123
-    command: server --console-address ":9001" /storage
+      MINIO_BUCKET: somebucketname
+    command: server --console-address ":9001" /data
     expose:
       - "9000"  #api
       - "9001"  #console
@@ -19,21 +21,8 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-
-  createbuckets:
-    image: minio/mc:latest
-    container_name: s3_createbuckets
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c '
-      until (/usr/bin/mc config host add myminio http://s3_minio:9000 minio minio123 ) do echo '...waiting...' && sleep 1; done;
-      [[ ! -z "`/usr/bin/mc ls myminio | grep test`" ]] || /usr/bin/mc mb myminio/test;
-      /usr/bin/mc policy set download myminio/test;
-      exit 0;
-      '
-
-  nginx:
+      
+  nginx: #for minio
     image: nginx:alpine
     hostname: nginx
     container_name: s3_nginx
@@ -44,3 +33,56 @@ services:
       - "9001:9001"
     depends_on:
       - minio
+
+  minioclient:
+    image: minio/mc
+    hostname: minioclient
+    container_name: minioclient
+    volumes:
+      - ./local/import:/import
+    depends_on:
+      minio: 
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc config host rm local;
+      /usr/bin/mc config host add --quiet --api s3v4 local http://minio:9000 minio minio123; 
+      /usr/bin/mc rb --force local/somebucketname/;
+      /usr/bin/mc mb local/somebucketname/ --region=eu-west-3; 
+      /usr/bin/mc anonymous set public local/somebucketname;
+      /usr/bin/mc cp /import/* local/somebucketname --recursive;
+      exec sleep inf;
+      "
+      #rb is to remove bucket
+      #mb is to create bucket
+      #anonymous has replaced policy
+      #to add some file in the bucket, 
+      #  first mount volume 
+      #  then mc cp <mount_point> local/somebucketname/ 
+      #exec sleep inf is set to no have the container shut down
+      #otherwise use exit 0;
+
+
+  awscli:
+    image: public.ecr.aws/aws-cli/aws-cli:latest
+    #image: amazon/aws-cli:latest
+    hostname: awscli
+    container_name: awscli
+    volumes:
+      - ./local/awscli:/root/.aws
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: > 
+      /bin/sh -c "
+      exec sleep inf;
+      "
+      #how to list files in the bucket: 
+      # > docker exec -ti awscli /bin/sh
+      # sh# aws --endpoint-url=http://minio:9000 s3 ls s3://somebucketname
+      # sh# aws --endpoint-url=http://minio:9000 s3 ls s3://somebucketname --recursive 
+
+
+networks:
+  default:
+    name: myproject_network
