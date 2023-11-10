@@ -17,10 +17,16 @@ services:
       - "9000"  #api
       - "9001"  #console
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+        #healthcheck has been modified with the last image (2023-11-06) curl has been removed (see log in inspect)
+#      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+#      interval: 30s
+#      timeout: 20s
+#      retries: 3
+      test: timeout 5s bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s      
       
   nginx: #for minio
     image: nginx:alpine
